@@ -27,19 +27,10 @@ jobs:
           echo "version=$VERSION"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-      - name: Check Cargo.toml version matches tag
+      - name: Update Cargo.toml version from tag
         run: |
-          CARGO_VERSION=$(cargo metadata --no-deps --format-version=1 \
-            | jq -r '.packages[0].version')
-
-          if [ "$CARGO_VERSION" != "${{ steps.tag.outputs.version }}" ]; then
-            echo "❌ Version mismatch!"
-            echo "Cargo.toml: $CARGO_VERSION"
-            echo "Tag:        ${{ steps.tag.outputs.version }}"
-            exit 1
-          fi
-
-          echo "✅ Version check passed"
+          sed -i "s/^version = \".*\"/version = \"${{ steps.tag.outputs.version }}\"/" Cargo.toml
+          echo "Cargo.toml version updated to ${{ steps.tag.outputs.version }}"
 
       - name: Publish to crates.io
         run: cargo publish --verbose
