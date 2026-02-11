@@ -3,6 +3,13 @@ name = "kovi-plugin-farm"
 version = "0.1.0"
 edition = "2024"
 
+description = "kovi plugin"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+homepage = "https://github.com/yiranxiaohui/kovi-plugin-farm"
+repository = "https://github.com/yiranxiaohui/kovi-plugin-farm"
+documentation = "https://docs.rs/kovi-plugin-farm"
+
 [dependencies]
 kovi = ">=0.12.6"
 reqwest = { version = "0.13.2", features = ["default", "json"] }
