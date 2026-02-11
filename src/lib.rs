@@ -7,7 +7,7 @@ use std::process::Stdio;
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 use kovi::{Message, MsgEvent, PluginBuilder as plugin, PluginBuilder};
-use kovi::log::{debug, error, info};
+use kovi::log::{error, info};
 use kovi::tokio::time::{interval, timeout};
 use reqwest::{Client};
 use reqwest::header::HeaderMap;
@@ -40,8 +40,9 @@ async fn main() {
                     .add_text(data.url);
                 event.reply(msg);
             } else if text.starts_with("农场状态") {
-                if let Some(status) = STATUS.get(&event.get_sender_nickname()) {
-                    let output = get_output(event.get_sender_nickname().clone()).await;
+                let uid = event.user_id.to_string();
+                if STATUS.contains_key(&uid) {
+                    let output = get_output(uid).await;
                     let mut text = format!("农场状态：\n");
                     for i in output {
                         text.push_str(format!("{}\n", i).as_str());
@@ -63,8 +64,8 @@ async fn main() {
     });
 }
 
-async fn get_output(nickname: String) -> VecDeque<String> {
-    if let Some(entry) = STATUS.get(&nickname) {
+async fn get_output(user_id: String) -> VecDeque<String> {
+    if let Some(entry) = STATUS.get(&user_id) {
         entry.output.lock().await.clone()
     } else {
         VecDeque::new()
@@ -186,14 +187,13 @@ async fn get_login_url(event: Arc<MsgEvent>, path: PathBuf) -> Data {
                     if ok == 1 {
                         info!("data = {:?}", data);
                         event.reply(format!("正在为[ {} ]启动脚本！", event.get_sender_nickname()));
-                        if STATUS.contains_key(&event.get_sender_nickname()) {
-                            if let Some(mut child) = STATUS.get_mut(&event.get_sender_nickname()) {
-                                child.child.kill().await.ok();
-                            }
-                            STATUS.remove(&event.get_sender_nickname());
+                        let uid = event.user_id.to_string();
+                        if let Some(mut child) = STATUS.get_mut(&uid) {
+                            child.child.kill().await.ok();
                         }
+                        STATUS.remove(&uid);
                         let code = get_auth_code(data.data.ticket.unwrap()).await;
-                        start(code, path.clone(), event.get_sender_nickname()).await;
+                        start(code, path.clone(), uid).await;
                         break;
                     }
                 }
@@ -204,7 +204,7 @@ async fn get_login_url(event: Arc<MsgEvent>, path: PathBuf) -> Data {
     data
 }
 
-async fn start(code: String, path: PathBuf, nickname: String) {
+async fn start(code: String, path: PathBuf, user_id: String) {
     let mut child = if cfg!(target_os = "windows") {
         Command::new("cmd")
             .args(["/C", "node", "client.js", "--code", code.as_str()])
@@ -225,10 +225,10 @@ async fn start(code: String, path: PathBuf, nickname: String) {
         child,
         output: Arc::clone(&output),
     };
-    STATUS.insert(nickname.clone(), process);
+    STATUS.insert(user_id.clone(), process);
 
     // 异步收集输出
-    let task_name = nickname.clone();
+    let task_name = user_id.clone();
     tokio::spawn(async move {
         let mut reader = BufReader::new(stdout).lines();
         while let Some(line) = reader.next_line().await.unwrap() {
@@ -307,20 +307,4 @@ struct AuthCode {
 struct Auth {
     appid: String,
     ticket: String,
-}
-
-async fn get_qq_number(message: Message) -> String{
-    let mut qq_number= String::new();
-    for segment in message.iter() {
-        info!("segment = {:?}", segment);
-        if segment.type_ == "at" {
-            if let Some(qq) = segment.data.get("qq").and_then(|v| v.as_str()) {
-                qq_number = qq.to_string();
-            }
-        }
-    }
-    if qq_number.is_empty() {
-        return String::new()
-    }
-    qq_number
 }
