@@ -59,6 +59,10 @@ async fn main() {
                 let msg = Message::new()
                     .add_text(format!("{}", event.get_sender_nickname()));
                 event.reply(msg);
+            } else if text.starts_with("农场在线数") {
+                let msg = Message::new()
+                    .add_text(format!("当前脚本在线数：{}", STATUS.len()));
+                event.reply(msg);
             }
         }
     });
@@ -209,16 +213,19 @@ async fn start(code: String, path: PathBuf, user_id: String) {
         Command::new("cmd")
             .args(["/C", "node", "client.js", "--code", code.as_str()])
             .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .current_dir(&path)
             .spawn().unwrap()
     } else {
         Command::new("node")
             .args(["client.js", "--code", code.as_str()])
             .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .current_dir(&path)
             .spawn().unwrap()
     };
     let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
     let output = Arc::new(Mutex::new(VecDeque::new()));
 
     let process = Process {
@@ -227,17 +234,41 @@ async fn start(code: String, path: PathBuf, user_id: String) {
     };
     STATUS.insert(user_id.clone(), process);
 
-    // 异步收集输出
-    let task_name = user_id.clone();
+    // 异步收集 stdout
+    let stdout_uid = user_id.clone();
+    let stdout_output = Arc::clone(&output);
     tokio::spawn(async move {
         let mut reader = BufReader::new(stdout).lines();
-        while let Some(line) = reader.next_line().await.unwrap() {
-            println!("[{}] {}", task_name, line);
-            let mut output = output.lock().await;
+        while let Ok(Some(line)) = reader.next_line().await {
+            println!("[{}] {}", stdout_uid, line);
+            let mut output = stdout_output.lock().await;
             if output.len() >= 10 {
                 output.pop_front();
             }
             output.push_back(line);
+        }
+    });
+
+    // 异步监听 stderr，出现异常输出时 kill 进程
+    let stderr_uid = user_id.clone();
+    tokio::spawn(async move {
+        let mut reader = BufReader::new(stderr).lines();
+        while let Ok(Some(line)) = reader.next_line().await {
+            error!("[{}] stderr: {}", stderr_uid, line);
+            let mut output = output.lock().await;
+            if output.len() >= 10 {
+                output.pop_front();
+            }
+            output.push_back(format!("[异常] {}", line));
+            drop(output);
+
+            // kill 进程并移除状态
+            if let Some(mut entry) = STATUS.get_mut(&stderr_uid) {
+                entry.child.kill().await.ok();
+            }
+            STATUS.remove(&stderr_uid);
+            error!("[{}] 检测到异常输出，已终止进程", stderr_uid);
+            break;
         }
     });
 }
