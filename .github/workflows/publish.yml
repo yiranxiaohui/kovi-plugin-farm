@@ -1,9 +1,8 @@
 name: Publish to crates.io
 
 on:
-  push:
-    branches:
-      - main
+  release:
+    types: [published]
 
 jobs:
   publish:
@@ -18,6 +17,29 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+
+      - name: Extract version from tag (strip v prefix)
+        id: tag
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          VERSION="${TAG#v}"
+          echo "tag=$TAG"
+          echo "version=$VERSION"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Check Cargo.toml version matches tag
+        run: |
+          CARGO_VERSION=$(cargo metadata --no-deps --format-version=1 \
+            | jq -r '.packages[0].version')
+
+          if [ "$CARGO_VERSION" != "${{ steps.tag.outputs.version }}" ]; then
+            echo "❌ Version mismatch!"
+            echo "Cargo.toml: $CARGO_VERSION"
+            echo "Tag:        ${{ steps.tag.outputs.version }}"
+            exit 1
+          fi
+
+          echo "✅ Version check passed"
 
       - name: Publish to crates.io
         run: cargo publish --verbose
