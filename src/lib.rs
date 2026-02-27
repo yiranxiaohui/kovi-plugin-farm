@@ -63,13 +63,24 @@ async fn main() {
                 let msg = Message::new()
                     .add_text(format!("当前脚本在线数：{}", STATUS.len()));
                 event.reply(msg);
+            } else if text.starts_with("退出农场") {
+                let uid = event.user_id.to_string();
+                if let Some(mut entry) = STATUS.get_mut(&uid) {
+                    entry.child.kill().await.ok();
+                    drop(entry);
+                    STATUS.remove(&uid);
+                    event.reply("已退出农场，脚本已停止运行");
+                } else {
+                    event.reply("您当前没有正在运行的农场脚本");
+                }
             } else if text.starts_with("农场帮助") {
                 let help_text = r#"🌾 农场插件帮助
 
 可用命令：
-• 登录农场 - 获取登录二维码，扫码后自动启动农场脚本
+• 登录农场 - 获取登录链接，登录后自动启动农场脚本
 • 农场状态 - 查看当前脚本运行状态及最近日志
 • 农场在线数 - 查看当前脚本在线数量
+• 退出农场 - 停止当前运行的农场脚本
 • 农场帮助 - 显示此帮助信息"#;
                 let msg = Message::new()
                     .add_text(help_text);
@@ -226,6 +237,7 @@ async fn start(code: String, path: PathBuf, user_id: String) {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .current_dir(&path)
+            .kill_on_drop(true)
             .spawn().unwrap()
     } else {
         Command::new("node")
@@ -233,6 +245,7 @@ async fn start(code: String, path: PathBuf, user_id: String) {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .current_dir(&path)
+            .kill_on_drop(true)
             .spawn().unwrap()
     };
     let stdout = child.stdout.take().unwrap();
@@ -245,18 +258,39 @@ async fn start(code: String, path: PathBuf, user_id: String) {
     };
     STATUS.insert(user_id.clone(), process);
 
-    // 异步收集 stdout
+    // 异步收集 stdout，并检测错误关键词
     let stdout_uid = user_id.clone();
     let stdout_output = Arc::clone(&output);
     tokio::spawn(async move {
         let mut reader = BufReader::new(stdout).lines();
         while let Ok(Some(line)) = reader.next_line().await {
             println!("[{}] {}", stdout_uid, line);
+
+            // 检测错误关键词
+            let is_error = line.contains("连接未打开")
+                || line.contains("检查失败")
+                || line.contains("巡查失败")
+                || line.contains("连接失败");
+
             let mut output = stdout_output.lock().await;
             if output.len() >= 10 {
                 output.pop_front();
             }
-            output.push_back(line);
+
+            if is_error {
+                output.push_back(format!("[错误] {}", line));
+                drop(output);
+
+                // kill 进程并移除状态
+                if let Some(mut entry) = STATUS.get_mut(&stdout_uid) {
+                    entry.child.kill().await.ok();
+                }
+                STATUS.remove(&stdout_uid);
+                error!("[{}] 检测到连接错误，已终止进程", stdout_uid);
+                break;
+            } else {
+                output.push_back(line);
+            }
         }
     });
 
