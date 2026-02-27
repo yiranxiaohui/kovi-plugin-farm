@@ -43,7 +43,7 @@ async fn main() {
                 let uid = event.user_id.to_string();
                 if STATUS.contains_key(&uid) {
                     let output = get_output(uid).await;
-                    let mut text = format!("农场状态：\n");
+                    let mut text = "农场状态：\n".to_string();
                     for i in output {
                         text.push_str(format!("{}\n", i).as_str());
                     }
@@ -62,6 +62,17 @@ async fn main() {
             } else if text.starts_with("农场在线数") {
                 let msg = Message::new()
                     .add_text(format!("当前脚本在线数：{}", STATUS.len()));
+                event.reply(msg);
+            } else if text.starts_with("农场帮助") {
+                let help_text = r#"🌾 农场插件帮助
+
+可用命令：
+• 登录农场 - 获取登录二维码，扫码后自动启动农场脚本
+• 农场状态 - 查看当前脚本运行状态及最近日志
+• 农场在线数 - 查看当前脚本在线数量
+• 农场帮助 - 显示此帮助信息"#;
+                let msg = Message::new()
+                    .add_text(help_text);
                 event.reply(msg);
             }
         }
@@ -316,7 +327,7 @@ fn get_headers() -> HeaderMap {
 
 pub async fn get_auth_code(ticket: String) -> String{
     let client = Client::builder().build().unwrap();
-    let url = format!("https://q.qq.com/ide/login");
+    let url = "https://q.qq.com/ide/login".to_string();
     let auth = Auth {
         appid: String::from("1112386029"),
         ticket: ticket.clone()
